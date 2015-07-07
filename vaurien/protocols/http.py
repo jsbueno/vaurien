@@ -73,3 +73,10 @@ class Http(BaseProtocol):
             keep_alive_dst = False
 
         return keep_alive_dst and self.option('keep_alive')
+
+
+class Https(Http):
+    # Pseudo HTTPS - conenction to https backend is done
+    # on the proxy class based on the procol name.
+    name = "https"
+

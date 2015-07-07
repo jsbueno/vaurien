@@ -72,8 +72,9 @@ Protocol.register(Redis)
 from vaurien.protocols.memcache import Memcache
 Protocol.register(Memcache)
 
-from vaurien.protocols.http import Http
+from vaurien.protocols.http import Http, Https
 Protocol.register(Http)
+Protocol.register(Https)
 
 from vaurien.protocols.smtp import SMTP
 Protocol.register(SMTP)

@@ -1,9 +1,11 @@
 import gevent
 import random
+import ssl as pyssl
 from uuid import uuid4
 
 from gevent.server import StreamServer
-from gevent.socket import create_connection
+from gevent.socket import AF_INET, has_ipv6, getaddrinfo, socket, SOCK_STREAM
+from gevent.ssl import wrap_socket
 from gevent.select import select, error
 
 from vaurien.util import parse_address, get_prefixed_sections, extract_settings
@@ -75,9 +77,16 @@ class DefaultProxy(StreamServer):
         logger.info('* async_mode: %d' % self.async_mode)
 
     def _create_connection(self):
-        conn = create_connection(self.dest, timeout=self.timeout)
+        sock, socket_address = create_socket_and_address(self.dest, timeout=self.timeout)
+        if self.protocol == 'https':
+            sock = wrap_socket(sock, ssl_version=pyssl.PROTOCOL_TLSv1)
+            sock.server_hostname = self.backend.split(':')[0]
+        sock.connect(socket_address)
+        conn = sock
         if self.async_mode:
             conn.setblocking(0)
+        if self.protocol == 'https':
+            conn.setblocking(1)
         return conn
 
     def get_behavior(self):
@@ -232,3 +241,33 @@ class OnTheFlyProxy(DefaultProxy):
         for name, value in options.items():
             self.behavior.settings[name] = value
         self._logger.info('Handler changed to "%s"' % behavior_name)
+
+
+def create_socket_and_address(address, timeout=None):
+    """
+    Copy of gevent.socket.create_connection, however, not creating
+    the actual  connection. The unconnected socket it returns is
+    suitable to be wrapped in an SSL socket.
+    """
+    host, port = address
+    err = None
+    for res in getaddrinfo(host, port, 0 if has_ipv6 else AF_INET, SOCK_STREAM):
+        af, socktype, proto, _canonname, sa = res
+        sock = None
+        try:
+            sock = socket(af, socktype, proto)
+            if timeout is not None:
+                sock.settimeout(timeout)
+            return sock, sa
+        except error as ex:
+            # without exc_clear(), if connect() fails once, the socket is referenced by the frame in exc_info
+            # and the next bind() fails (see test__socket.TestCreateConnection)
+            # that does not happen with regular sockets though, because _socket.socket.connect() is a built-in.
+            # this is similar to "getnameinfo loses a reference" failure in test_socket.py
+            if sock is not None:
+                sock.close()
+            err = ex
+    if err is not None:
+        raise err
+    else:
+        raise error("getaddrinfo returns an empty list")
